@@ -5,7 +5,7 @@ using FFTW
 
 # rf step = ratio of dwell times of rf to adc
 # tr in time units of adc
-function splitTR(rf::AbstractVector{<: Real}, adc::AbstractVector{<: Real}, δt_rf::Real, δt_adc::Real, adc_length::Integer, tr::Integer)
+function splitTR(rf::AbstractVector{<: Real}, adc::AbstractVector{<: Real}, δt_rf::Real, δt_adc::Real, tr::Integer)
 
 	rf_step = floor(Int, δt_rf / δt_adc)
 	@assert rf_step * δt_adc == δt_rf
@@ -20,32 +20,30 @@ function splitTR(rf::AbstractVector{<: Real}, adc::AbstractVector{<: Real}, δt_
 	τ = 1
 	hadpulse = false
 	hadadc = false
+
 	while t <= length(adc)
 
 		if τ <= length(rf) && rf[τ] > 0
 			hadpulse && pop!(tr_start) # remove last pulse, because no ADC happened
 			hadpulse = true
-			while rf[τ] != 0
+			while rf[τ] != 0 || adc[t] != 0
 				τ += 1
 				t += rf_step
 				τ > length(rf) && break
 			end
-			τ <= length(rf) && push!(tr_start, t)
+			# Found that this cuts off last element in tr_start, unexpectedly: τ <= length(rf) &&
+			push!(tr_start, t)
 			continue # need this in case t > length(adc) or length(rf)
 		end
 
 		if hadpulse && adc[t] == 1
 			push!(adc_start, t)
 
-			s = 1
-			while adc[t] == 1
+			while t ≤ length(adc) && adc[t] == 1
 				t += 1
-				s += 1
-				t > length(adc) && break
 			end
 
 			t <= length(adc) && push!(adc_end, t-1)
-			s-1 != adc_length && error("Readout at t = $t has unexpected length ($(s-1))")
 
 			hadpulse = false
 		end
@@ -61,7 +59,7 @@ function compute_trajectory(
 	g::AbstractVector{<: Real},
 	tr_start::AbstractVector{<: Integer},
 	adc_start::AbstractVector{<: Integer},
-	adc_end::AbstractVector{<: Integer}, # might remove this or start, as it can be computed from adc_start+adc_length-1
+	adc_end::AbstractVector{<: Integer}, # should remove this, as it can be computed from adc_start+adc_length-1. This way it forces the user to use readouts of same length which makes sense (for a given purpose)
 	adc_length::Integer,
 	num_samples::Integer,
 	δt_adc::Real,
