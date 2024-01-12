@@ -23,7 +23,7 @@ function splitTR(rf::AbstractVector{<: Real}, adc::AbstractVector{<: Real}, δt_
 
 	while t <= length(adc)
 
-		if τ <= length(rf) && rf[τ] > 0
+		if τ <= length(rf) && rf[τ] != 0
 			hadpulse && pop!(tr_start) # remove last pulse, because no ADC happened
 			hadpulse = true
 			while rf[τ] != 0 || adc[t] != 0
@@ -37,13 +37,21 @@ function splitTR(rf::AbstractVector{<: Real}, adc::AbstractVector{<: Real}, δt_
 		end
 
 		if hadpulse && adc[t] == 1
-			push!(adc_start, t)
+			t_start = t
 
+			noadc = false
 			while t ≤ length(adc) && adc[t] == 1
+				if τ <= length(rf) && rf[τ] != 0 # All this because DICO measurement is simulated as ADC
+					noadc = true
+					break
+				end
+				τ = t ÷ rf_step + 1
 				t += 1
 			end
+			noadc && continue
 
-			t <= length(adc) && push!(adc_end, t-1)
+			push!(adc_start, t_start)
+			push!(adc_end, t-1)
 
 			hadpulse = false
 		end
@@ -55,6 +63,7 @@ function splitTR(rf::AbstractVector{<: Real}, adc::AbstractVector{<: Real}, δt_
 end
 
 
+# k returned in units of [g] * [δt_g]
 function compute_trajectory(
 	g::AbstractVector{<: Real},
 	tr_start::AbstractVector{<: Integer},
@@ -103,6 +112,7 @@ calculating the realised trajectory
 
 # Requires χ in the time-domain, with the first index corresponding to time = 0
 # Returns the non-fftshifted spectrum of the GIRF using rfft, if necessary it has been padded in time-domain to match gradient
+# TODO: could prep the rfft for the apply, but shouldn't give much performance benefit since usually only applied to three curves
 function prepare(χ::AbstractArray{<: Number, 3}, dt_χ::Real, T_g::Real)
 	# Match frequency resolution by zero-padding time domain
 	T_χ = size(χ, 1) * dt_χ
@@ -123,15 +133,16 @@ function prepare(χ::AbstractArray{<: Number, 3}, dt_χ::Real, T_g::Real)
 	return rfft(χ_pad, 1)
 end
 
-#= Note:
+# MAKE SURE TO ZERO PAD GRADIENTS TO AVOID WRAP AROUND ARTEFACTS (Periodicity due to FT)
+#= Explanation:
 	There must be enough wiggle-room in the gradient waveform w.r.t. where gradients are non-zero and
 	also considering the delay of the GIRF as well as its width.
 	If that's not the case, errors will be introduced because the assumption is that both curves are periodic.
 =#
 # Assumes that g and χ correspond to the same time-window (and periodic outside) and Fχ the non-fftshifted rfft of χ
+# g[time, curve]
 function apply(g::AbstractMatrix{<: Real}, Fχ::AbstractArray{<: Number, 3})
 	@assert size(g, 2) == size(Fχ, 2)
-
 
 	Fg = rfft(g, 1)
 	n = min(size(Fg, 1), size(Fχ, 1))
