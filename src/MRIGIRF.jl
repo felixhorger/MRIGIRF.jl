@@ -5,16 +5,20 @@ using FFTW
 
 # rf step = ratio of dwell times of rf to adc
 # tr in time units of adc
+# rf_start is where rf != 0 and adc != 0
+# adc_end and rf_end are the last index of rf and adc in adc time resolution
+# TODO: this is becoming more and more specific to Siemens' Poet simualtion (DSV files), it should be outsourced, probably into the SiemensDSV.jl package
 function splitTR(rf::AbstractVector{<: Real}, adc::AbstractVector{<: Real}, δt_rf::Real, δt_adc::Real, tr::Integer)
 
 	rf_step = floor(Int, δt_rf / δt_adc)
 	@assert rf_step * δt_adc == δt_rf
 
-	tr_start = Vector{Int}(undef, 0)
+	rf_start = Vector{Int}(undef, 0)
+	rf_end = Vector{Int}(undef, 0)
 	adc_start = Vector{Int}(undef, 0)
 	adc_end = Vector{Int}(undef, 0)
 	num_tr = length(adc) ÷ tr
-	sizehint!.((tr_start, adc_start, adc_end), num_tr)
+	sizehint!.((rf_start, rf_end, adc_start, adc_end), num_tr)
 
 	t = 1
 	τ = 1
@@ -24,15 +28,18 @@ function splitTR(rf::AbstractVector{<: Real}, adc::AbstractVector{<: Real}, δt_
 	while t <= length(adc)
 
 		if τ <= length(rf) && rf[τ] != 0
-			hadpulse && pop!(tr_start) # remove last pulse, because no ADC happened
+			if hadpulse
+				pop!.((rf_start, rf_end)) # remove last pulse, because no ADC happened
+			end
+			push!(rf_start, t)
 			hadpulse = true
 			while rf[τ] != 0 || adc[t] != 0
 				τ += 1
 				t += rf_step
 				τ > length(rf) && break
 			end
-			# Found that this cuts off last element in tr_start, unexpectedly: τ <= length(rf) &&
-			push!(tr_start, t)
+			# Found that this cuts off last element in rf_end, unexpectedly: τ <= length(rf) && <line below>
+			push!(rf_end, t-1)
 			continue # need this in case t > length(adc) or length(rf)
 		end
 
